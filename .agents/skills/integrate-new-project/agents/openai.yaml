@@ -1,7 +1,0 @@
-interface:
-  display_name: "Integrate New Project"
-  short_description: "Integrar un nuevo proyecto Django al ecosistema VPS (14..."
-  default_prompt: "Use $integrate-new-project to handle this task with its documented workflow."
-
-policy:
-  allow_implicit_invocation: true

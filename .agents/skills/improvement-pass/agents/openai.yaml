@@ -1,6 +1,6 @@
 interface:
   display_name: "Improvement Pass"
-  short_description: "Coordina security-pass, maintainability-pass..."
+  short_description: "Orquesta una ronda de mejora de UN proyecto en seis frentes..."
   default_prompt: "Use $improvement-pass to handle this task with its documented workflow."
 
 policy:

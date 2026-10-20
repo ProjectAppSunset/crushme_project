@@ -9,7 +9,8 @@ allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, AskUserQuestion, Ente
 
 Poder detectar y explicar un fallo real, y limitar sus efectos cuando una
 dependencia externa, retry o carrera interviene. Leer
-`$HOME/webapps/vps-ops-toolkit/workflows/improvement/IMPROVEMENT_STANDARDS.md`.
+`$HOME/webapps/vps-ops-toolkit/workflows/improvement/IMPROVEMENT_STANDARDS.md`,
+con su «Protocolo de validación de candidatos».
 Para integración con ProjectApp, leer también
 `workflows/improvement/PROJECTAPP_EVENT_CONTRACT.md` en ese mismo toolkit y
 corroborar la versión vigente de la API antes de proponer un payload.
@@ -18,8 +19,8 @@ corroborar la versión vigente de la API antes de proponer un payload.
 
 Sin menú por diseño (§4): el alcance y el modo se resuelven de la invocación y del contexto; la delegación conserva la selección del conductor.
 
-Sin picker por diseño: default diagnostica hasta tres candidatos nuevos y
-registra hallazgos; `--apply` cambia sólo candidatos elegibles; `--check` no
+Sin picker por diseño: default diagnostica y valida (§1b) hasta tres
+candidatos nuevos y registra hallazgos; `--apply` cambia sólo candidatos elegibles; `--check` no
 escribe nada; `--refresh` sólo descubre/registra; `--review3` revisa hasta tres
 anteriores. Modos excluyentes. Hereda contexto delegado de [[improvement-pass]]
 sin preguntar modo ni crear otra rama.
@@ -49,11 +50,85 @@ simulados/fixtures; no provocar outages, correos o pagos reales. Una señal
 ausente sólo se convierte en candidato al nombrar qué fallo quedaría invisible
 y qué decisión permitiría tomar. Más logs/traces por sí solos no son mejora.
 
+## 1b. Validación del frente
+
+Cada candidato pasa por el «Protocolo de validación de candidatos» del contrato
+antes de seleccionarse: registro con tres veredictos; verificación **antes de
+seleccionar** de todo candidato propuesto, de la causa más fuerte del alcance aunque
+la conclusión sea MADURO o NO VALE LA PENA, de todo `mandatory` o `bloqueante` y de
+los previos con fuente cambiada; modalidad `quick`, y `standard` automática para
+`mandatory` y `bloqueante`; crítico de cobertura y ledger de cobertura. Esta sección
+sólo agrega lo propio de observabilidad.
+
+Sola, la pasada lanza un verificador fresco por candidato, que no lo descubrió, y,
+al cerrar el diagnóstico, el crítico del contrato, con las herramientas de
+«Herramientas por host»: `Agent` en Claude Code o `spawn_agent` en Codex; en un VPS
+del fleet, sólo `Agent`. Delegada, la pasada no lanza subagentes: el crítico y los
+verificadores los lanza el conductor, y la pasada recibe el registro ya decidido.
+Sin verificador o sin crítico rige «Sin subagentes, sin verificador o sin crítico»
+del contrato.
+
+Misma causa raíz = el mismo punto donde la señal se pierde o el efecto se repite
+(un cliente compartido sin timeout, un `except` que traga el error), aunque lo
+atraviesen varios procesos.
+
+El registro nombra el modo de falla, su disparador y la corrección propuesta. El
+verificador re-lee cada `file:line` y trata de refutar:
+
+1. **Falla real y alcanzable.** Camino completo desde el disparador (llamada
+   externa, tarea, request, cancelación) hasta el punto donde la falla se
+   pierde, se repite o corrompe estado.
+2. **Hoy no se ve.** Recorrer lo que ya podría mostrarla: `LOGGING` y sus
+   handlers, manejo de errores del framework, middleware, registro de fallos de
+   Huey/Celery, `/api/health/` o una integración existente. Si ya la muestra con
+   contexto suficiente, `rejected`. Si podría verse por algo que no está en el
+   repo (journald, alertas del host, nginx), no suponer presencia ni ausencia:
+   `needs_validation` con la observación concreta que haría el operador.
+3. **Decisión que habilita.** Quién actúa y qué hace con la señal nueva. Una
+   señal sin dueño, que no cambia ninguna decisión o que sólo suma volumen se
+   refuta.
+4. **Resiliencia demostrable.** Timeout realmente ausente o incompleto en esa
+   frontera (la llamada y sus defaults); retry que envuelve un efecto no
+   idempotente (pago, notificación, escritura) según su configuración real;
+   ventana de lectura-modificación-escritura sin lock, constraint, `F()` ni clave
+   de idempotencia. Se demuestra con fixtures, reloj simulado o dos llamadas en
+   la DB de test, nunca con dependencias reales.
+5. **Corrección dentro del frente.** No crea ni instala un emisor, no registra
+   fuentes, no genera tokens, no envía HTTP a ProjectApp, no activa monitoreo ni
+   contrata servicios; un payload propuesto respeta la API v1 de
+   `PROJECTAPP_EVENT_CONTRACT.md`. Lo que exceda eso queda como propuesta o
+   «integración pendiente», nunca como recepción verificada.
+6. **Privacidad.** La corrección no registra argumentos, SQL completo, bodies,
+   tokens ni identificadores de usuarios como dimensión. Si el código actual ya
+   expone datos sensibles, la causa es de [[security-pass]]: se reasigna, no se
+   duplica.
+
+El verificador no lee logs vivos ni datos reales: usa los extractos saneados ya
+citados en el reporte y, si lo decisivo sólo está en el host, deja un plan de
+lectura filtrada para el operador. Anclas de impacto, subordinadas a la escala
+del contrato: ALTO = pérdida de datos, efecto externo duplicado o proceso
+crítico que falla en silencio, con camino demostrado (y no se difiere por
+economía); MEDIO = falla visible pero no diagnosticable, o frontera sin timeout
+con efecto acotado; BAJO = contexto adicional en caminos raros o de poco efecto
+(`marginal`: una línea de descarte). Si al aplicar aparece evidencia que cambia el
+registro, vuelve a un verificador fresco antes de seguir.
+
+**Ledger de cobertura de observabilidad.** Una unidad por proceso crítico ×
+pregunta de la tabla de §1, con el esquema del ledger de cobertura del contrato: en
+`unit`, `process` y `question`; sus chequeos nombran la interfaz externa, las rutas
+seguidas (inicio, error, recuperación, cancelación) y las señales existentes con
+`file:line`. Un control fuera del repo que quedó sin observar deja la unidad
+`blocked` con su razón. Una unidad aparte declara la integración ProjectApp:
+`covered` si existe y se auditó, `deferred` con «integración pendiente», o
+`not_applicable`.
+
 ## 2. Selección y aplicación acotada
 
-Registrar candidatos `observability` según el contrato común; pérdida de datos,
-efectos duplicados comprobados o regresiones obligatorias no se difieren por
-economía. No inventar una observación exitosa donde faltan ejecución o datos.
+Registrar candidatos `observability` con el veredicto que dejó el verificador
+(§1b), según el contrato común; sólo se aplican los `confirmed` que selecciona el
+umbral del contrato. Pérdida de datos, efectos duplicados comprobados o
+regresiones obligatorias no se difieren por economía. No inventar una observación
+exitosa donde faltan ejecución o datos.
 
 Aplicar sólo cambios con beneficio: contexto/error estable y saneado, timeout
 en la frontera, retry limitado para operaciones que permiten repetición,
@@ -104,14 +179,22 @@ duplicados, 409 por contenido distinto, rechazo/saneamiento, timeout/red/429/5xx
 cola llena, credencial revocada, ACK inválido, recuperación y carreras. La skill
 no autoriza ejecutar ahora esos escenarios contra el API real.
 
-Guardar reporte y registro; applied espera QA. Independiente: handoff [[qa]],
+Guardar reporte y registro, con los registros validados y el ledger de
+cobertura de §1b (sin métricas; en `--check`, sólo en la respuesta); applied
+espera QA. Independiente: handoff [[qa]],
 sin inline QA. Delegada: devolver IDs, diff, guion, contrato/eventos propuestos
 y pendientes; no abrir PR/commit propios.
 
 ## Output final
 
 Usar [[_output-protocol]]: Señales · Diagnóstico · Resiliencia · Privacidad ·
-ProjectApp · Valor · QA. Separar recepción demostrada de propuesta pendiente y
-alcance suficiente de ausencia de evidencia. Cerrar con
+ProjectApp · Validación · Cobertura · Valor · QA, con el estado del frente del
+contrato (MADURO, NO VALE LA PENA, VALE LA PENA, BLOQUEADO o FALTA EVIDENCIA).
+Separar recepción demostrada de propuesta pendiente y alcance suficiente de
+ausencia de evidencia. Cerrar con
 `🟢/🟡/🔴 observability-pass — <resultado>` según evidencia; bloque de avance
 antes de esa última línea.
+
+## Referencias externas
+
+- https://github.com/cloudflare/security-audit-skill · commit c1c8a8c1471069fb0e188eeaff69b8e8db6564a8 · revisado 2026-10-10 · Adaptado de cloudflare/security-audit-skill (MIT) · validación independiente de candidatos, crítico de cobertura y ledger de cobertura

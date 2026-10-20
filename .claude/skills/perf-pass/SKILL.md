@@ -25,11 +25,12 @@ regresión, pérdida de datos o riesgo de seguridad demostrado **no se descarta 
 se corrige dentro de los LÍMITES o se declara bloqueado con su siguiente acción.
 
 Cada candidato lleva `value_assessment: {benefit, effort, change_risk, mandatory, reason,
-evidence}`: `benefit=material|minor|unknown`, `effort=S|M|L`, `change_risk=low|medium|high`.
-Beneficio material requiere evidencia concreta; beneficio menor sólo es elegible con
-`S`, riesgo `low` y utilidad concreta. Menor con mayor esfuerzo/riesgo queda
-`deferred-low-value`; incierto queda diagnosticado con decisión `needs-evidence`, nunca
-como frente suficiente. Una mejora puramente cosmética sin utilidad queda descartada.
+evidence}`: `benefit=material|minor|marginal|unknown`, `effort=S|M|L`,
+`change_risk=low|medium|high`. La elegibilidad la decide el umbral del contrato sobre el
+registro ya validado (Fase 2b): lo que no lo alcanza queda `deferred-low-value`; un
+`needs_validation` o un beneficio incierto quedan diagnosticados con decisión
+`needs-evidence`, nunca como frente suficiente. Una mejora puramente cosmética sin utilidad
+queda descartada.
 No reinterpretar un fallo del presupuesto obligatorio como beneficio menor.
 
 El helper conserva IDs/estados históricos y calcula la decisión y el contexto: código
@@ -50,7 +51,9 @@ Con `IMPROVEMENT_CONTEXT` de [[improvement-pass]] se heredan `conductor`, `round
 y `owns_git=conductor`. Ese bloque es contexto de la skill, **no un flag nuevo del helper**.
 Validar que `session-worktree.sh status` describe ese proyecto/worktree/rama/base y que
 la sesión o el PR pertenecen al conductor. Contexto ajeno o incoherente ⇒ bloquear antes
-de escribir. El límite es **tres candidatos globales** de la ronda, no tres por skill.
+de escribir. El cupo es el de la ronda: hasta tres candidatos por frente en el modo por
+frente y tres en total en el modo de una rama ([[improvement-pass]]); esta skill no agrega
+otro.
 
 Este modo tiene precedencia sobre picker, creación de worktree, commits/push/PR y menús
 de las fases siguientes: se trabaja sólo sobre los candidatos y paths asignados, en el
@@ -191,7 +194,8 @@ luego ⏸️.
    el clon principal. PR al primer push con `Sesión:`/`Intención:`. **Nunca se mergea.**
 8. **La verificación es de `/qa`.** Esta skill no escribe ni corre tests de presupuesto ni se
    "verifica" con mediciones; el único autocontrol es el guard estático del diff (Fase 4). Un
-   test que mide tiempo no se escribe nunca (estándar §6).
+   test que mide tiempo no se escribe nunca (estándar §6). La validación independiente del
+   hallazgo (Fase 2b) no verifica la corrección: como la Fase 1b, sólo mira el estado actual.
 9. **Máximo 3 candidatos por corrida**; un cupo que no se puede aplicar no se rellena. Lo que
    se ve de paso lo anota el scout.
 10. **Ledger sin métricas; reporte inmutable con los números.** Commit propio en `master` del
@@ -298,10 +302,63 @@ Los `assumptions` se escriben acá, con fuente, copiando los valores literales d
 y del perfil: `"slots=2 workers×1 thread (systemd)"`, `"cpu_req=0.20 core/request (profile)"`,
 `"dataset_ceiling=200000 filas app.Model (declarado)"`.
 
+## Fase 2b — Validación independiente (Protocolo común)
+
+Antes de la Fase 3, cada hallazgo `corregible` que pueda proponerse —y al menos el más
+fuerte de la corrida, aunque la conclusión sea parar— pasa por el «Protocolo de validación
+de candidatos» del contrato común: registro con tres veredictos, verificación antes de
+seleccionar, modalidad `quick` (`standard` automática para `mandatory` y `bloqueante`),
+crítico de cobertura y ledger de cobertura. Sola, la pasada lanza un verificador fresco
+por candidato —nunca `perf-scout`, que escribe en el ledger— y el crítico del contrato,
+con las herramientas de «Herramientas por host»: `Agent` en Claude Code o `spawn_agent` en
+Codex; en un VPS del fleet, sólo `Agent`. Delegada, no lanza subagentes: los lanza el
+conductor. El modo A no lo salta. Sin verificador o sin crítico rige «Sin subagentes, sin
+verificador o sin crítico» del contrato. Misma causa raíz = el mismo queryset, tarea o
+import, aunque degrade varios caminos.
+
+El verificador recibe el registro, la línea ⚙️ literal y §2, §4 y §5 del estándar; re-lee
+cada `file:line` y trata de refutar:
+
+1. **Mecanismo.** El N+1, el `.all()` sin cota, la tarea o el chunk ocurren en el camino
+   real: un manager, `get_queryset`, `Prefetch`, anotación, cache o `select_related` aguas
+   arriba que ya lo resuelve lo refuta.
+2. **Presupuesto del host real.** Los valores citados son los de `budgets=` del
+   `profile_id` que sirve el proyecto. Con `profile_source=fleet_default` y `server:`
+   declarado, lo que depende del perfil (`cpu_req`, `worker_mb`, `rows_max`) queda
+   `needs_validation` con la recalibración como plan; constancia `Q(1)==Q(N)`, queries por
+   request, `page_size_max`, umbral de índice, `task_s`, payload y bundle se pueden decidir.
+3. **Caso.** `worst`/`conservative` en el orden de §4, con la fuente de cada supuesto.
+4. **Evidencia de §5.** `file:line` leído en esta corrida y un `cmd:` reproducible con su
+   salida en el reporte. El verificador repite sólo comandos locales de §5, dentro de los
+   rails de esta skill y de los «Límites de la evidencia y de la ejecución» del contrato:
+   en DEV, `pytest … -k budget` en un worktree de sesión contra su DB de test y bajo el
+   candado común, `sqlmigrate`, stats del build o `grep -c`; en un VPS con motor, nada sin
+   el OK del operador para esa ronda. Nunca `EXPLAIN`/`COUNT`/`shell` fuera de dev, nunca
+   staging ni producción, nunca tiempos. Una salida de staging del descubridor que el
+   estándar admite (`EXPLAIN` de lectura) cuenta si está citada y corresponde al mismo
+   código, y nunca reemplaza al verificador.
+5. **Clase y LÍMITES.** `corregible` sólo si la corrección conserva contrato y datos y cae
+   en `paths`; `infra/*`, cambio de contrato o archivo de otro dueño es observación aunque
+   el hallazgo sea cierto.
+
+`confirmed` exige los cinco puntos. Sin `cmd:`, un mecanismo que rompe por construcción la
+constancia `Q(1)==Q(N)` puede confirmarse con `confidence: inferred` e impacto MEDIO como
+máximo (la excepción de §5 del estándar); lo demás sin `cmd:` queda `needs_validation`, con
+el comando exacto como plan local. Un `needs_validation` no se aplica (decisión
+`needs-evidence`); una medición posterior es un reemplazo y la confirma otro verificador
+fresco. Anclas de impacto, subordinadas a la escala del contrato: `bloqueante` medido ⇒
+ALTO · `mayor` ⇒ MEDIO · `menor` ⇒ BAJO (`marginal`).
+
+**Ledger de cobertura.** Una unidad por módulo o proceso × categoría de §3, con el esquema
+del ledger de cobertura del contrato: en `unit`, `process` y `category`; sus chequeos
+nombran los paths y `performance_paths` revisados, el inventario estático y dinámico
+(`cmd:` o ⏭️ con su razón) y el perfil y el caso usados. Una observación `infra/*` deja la
+unidad `blocked` con su puntero. Sin números: las mediciones siguen sólo en «Mediciones».
+
 ## Fase 3 — Propuesta
 
-Cerrar acá `value_assessment` por candidato con la evidencia de la Fase 2 y la política
-común. Sólo los elegibles pasan a aplicar. Los diferidos conservan su motivo; los
+Cerrar acá `value_assessment` por candidato con el registro validado de la Fase 2b y la
+política común. Sólo los `confirmed` elegibles pasan a aplicar. Los diferidos conservan su motivo; los
 inciertos necesitan evidencia. Si no hay elegibles, saltar a registro y explicar dónde
 conviene parar sin crear commits vacíos ni enviar mejoras no aplicadas a QA como hechas.
 
@@ -319,7 +376,8 @@ salta a la Fase 5 (sin escribir).
 
 Precondiciones: `standard≠no-canonical` · `host_status≠wrong-host` · identidad git
 (`git var GIT_COMMITTER_IDENT`; si falla, `user.name`/`user.email` repo-local, nunca
-`--global`) · evaluación de valor vigente y elegible · tree limpio en el worktree de sesión.
+`--global`) · registro `confirmed` (Fase 2b) · evaluación de valor vigente y elegible · tree
+limpio en el worktree de sesión.
 **Modo A** reutiliza el worktree/rama de la sesión.
 **Modo B** crea el suyo por el protocolo por sesión (`git-branch-protocol`):
 
@@ -409,12 +467,26 @@ devuelve su veredicto; el `tests_declared` del ledger son los archivos `target` 
 
 ## Fase 6 — Registro + reporte (en cualquier modo; registrar no es escribir en el proyecto)
 
+**En un host con el motor de integridad** (`[ -x /usr/local/sbin/vps-integrity ]`), el clon
+`~/webapps/vps-ops-toolkit` está fijado a la generación instalada: esta corrida no escribe ni
+commitea nada en él. El reporte va a
+`~/.local/state/vps-ops-toolkit/perf-reports/<YYYY-MM-DD>-<proyecto>-perf-<slug>.md`, fuera de
+todo clon, con el fragmento de `--record` del punto 2 y la línea de `watchlist` de la 5b
+adentro, como «registro pendiente»; la 5b y los puntos 2 y 3 no corren, y el registro en el
+ledger se hace después desde DEV. Lo mismo vale para `--record-qa`. Quién lo trae a DEV: la
+sesión que condujo la pasada deja en su reporte final la ruta y el sha del reporte del host.
+Si hay un orquestador, éste le encarga el `--record` (y el `--record-qa`) a una sesión de DEV
+por su propio canal, nunca a través del operador; si no lo hay, el operador abre una sesión
+de DEV y lo corre ahí. La sesión de DEV lee el reporte del host por `tailscale ssh`, en sólo
+lectura, verifica el sha antes de registrar y lo registra con su fragmento.
+
 1. **Reporte de la corrida** (Write, toolkit):
    `docs/audits/<YYYY-MM-DD>-<proyecto>-perf-<slug>.md` (`<slug>` = `top3` / `review3` /
    `catalog` / el módulo del requerimiento; misma fecha ⇒ sufijo `-2`; nunca `.bak.md`),
    secciones fijas: Alcance y perfil de cómputo (la línea ⚙️ literal) · Preflight (estándar,
    coordenada, `budgets=`) · Inventario (archivos leídos, hits) · Hallazgos por categoría
-   (tabla de la Fase 2) · Supuestos y caso por candidato · **Mediciones** (único lugar con
+   (tabla de la Fase 2) · Validación (registro y veredicto por candidato, Fase 2b) · Ledger de
+   cobertura · Supuestos y caso por candidato · **Mediciones** (único lugar con
    números: salidas de pytest/`sqlmigrate`/`EXPLAIN` en staging/`du`, líneas de Silk/slow log)
    · Cambios aplicados (archivo:línea, commit, PR URL) · Observaciones y escalaciones (infra →
    runbook) · Guion brief-perf · Beneficio y criterio para parar (por alcance evaluado) ·
@@ -438,7 +510,7 @@ severity: <bloqueante|mayor|menor>
 confidence: <measured|inferred>
 effort: <S|M|L>
 value_assessment:
-  benefit: <material|minor|unknown>
+  benefit: <material|minor|marginal|unknown>
   effort: <S|M|L>
   change_risk: <low|medium|high>
   mandatory: <true|false>
@@ -483,6 +555,9 @@ Commit propio en `master` del toolkit, nunca mezclado con el commit del proyecto
 sigue la cadencia normal (`/git-commit`).
 
 ## `--record-qa` — registrar el veredicto de /qa (modo posterior, se tipea)
+
+En un host con el motor de integridad no corre: el veredicto se registra después desde DEV
+(Fase 6).
 
 ```bash
 bash ~/webapps/vps-ops-toolkit/scripts/perf/perf-ledger.sh --record-qa <proyecto> --candidate=<id>
@@ -547,6 +622,8 @@ commit del toolkit `docs(perf): record <proyecto> <id> qa=<status>`.
   toolkit; el proyecto recibe código, la copia del estándar y `.testquality.yml`.
 - "Un `assert duration < 0.2`" → un test que mide tiempo no se escribe (flaky por diseño);
   conteo de queries, de fetch o de filas.
+- "El N+1 es obvio, lo confirmo yo" → lo confirma un verificador fresco (Fase 2b); quien
+  inventarió no valida su propio hallazgo, y sin `cmd:` el impacto no pasa de MEDIO.
 
 ## Acciones disponibles
 
@@ -584,6 +661,8 @@ sobre ESTA corrida; el de /qa es una fila aparte):
 | Inventario estático | ✅ | N archivos leídos 1 vez · N hits |
 | Inventario dinámico | ✅ | pytest presupuesto N · sqlmigrate · silk/slow log leídos (⏭️ sin app ni señales) |
 | Hallazgos por categoría | ℹ️ | bloqueante N · mayor N · menor N — queries N · tasks N · assets N |
+| Validación | ✅ | confirmed N · needs_validation N (con plan) · rejected N — un verificador fresco por candidato (⚠️ sin verificador independiente) |
+| Cobertura | ℹ️ | módulo/proceso × categoría: no examinadas N con razón · huecos del crítico N · estado del frente: MADURO / NO VALE LA PENA / VALE LA PENA / BLOQUEADO / FALTA EVIDENCIA |
 | Beneficio | ℹ️ | elegibles <ids> · diferidos por poco retorno <ids> · falta evidencia <ids> · alcance suficiente <alcance y condición de reapertura> |
 | Caso y supuestos | ✅ | worst N · conservative N (escalación en observaciones) |
 | Cambios aplicados | ✅ | N/N corregibles · commits <sha…> · PR #n (⏭️ diagnóstico · ⚠️ N bloqueados por guard) |
@@ -610,9 +689,14 @@ Casos de veredicto:
 - 🟡 `profile_source=fleet_default` con `server:` declarado; estándar `stale`/`absent`;
   inventario dinámico ⏭️ (todo `inferred`); corregibles bloqueados por el guard;
   `conservative` usado; `registry=absent`; sin capa de tests (handoff ⏭️, estado `applied`);
-  diagnóstico en `wrong-host`; scout `PARTIAL`.
+  diagnóstico en `wrong-host`; scout `PARTIAL`; validación incompleta (`needs_validation`, sin
+  verificador independiente o sin crítico).
 - 🔴 guard del diff disparado sin poder aislar; push/PR fallido; helper del ledger ausente o
   con error; `--record` rechazado por métricas tipeadas sin corregir.
 - 🚫 `--apply`/modo A sin estándar canónico, o en `wrong-host` (el diagnóstico se entrega igual).
 - ⏸️ scout sin retorno tras los reintentos; sin app, sin señales del host y sin `paths` derivables.
 - ⏭️ candidato/proceso no identificable tras la pregunta en texto (no se escribe nada).
+
+## Referencias externas
+
+- https://github.com/cloudflare/security-audit-skill · commit c1c8a8c1471069fb0e188eeaff69b8e8db6564a8 · revisado 2026-10-10 · Adaptado de cloudflare/security-audit-skill (MIT) · validación independiente de candidatos, crítico de cobertura y ledger de cobertura

@@ -22,6 +22,11 @@ description: "Inspect git changes, generate a professional commit message with F
 >   deprecado** de `--all-repos` (con warning).
 > - Con `--no-propagate`: salta la propagación del toolkit al fleet (útil
 >   offline / sin Tailscale). Combinable con `--all-repos`.
+> - **Mientras rija la metodología de Integrity** (CLAUDE.md, «Integridad del
+>   fleet»): siempre `--no-propagate`. La propagación sale de DEV y sólo como
+>   parte del setup de esa misma generación en cada host (R26, L051). Desde T+2,
+>   un VPS con motor responde `PINNED` a un target que no es su generación: es lo
+>   normal, no una falla (ver Phase 2).
 >
 > **Dónde aterriza el commit (repos de proyecto del fleet):** SIEMPRE en el
 > **worktree de sesión** (`~/webapps/.wt/<repo>/<slug>`), sobre TU rama, y el
@@ -314,6 +319,18 @@ se revierte por una falla de propagación.
    - `SYNC_BLOCKED <causa>` → el host rechazó el avance (rama incorrecta,
      tree sucio, target distinto o no-fast-forward); no hace checkout, rebase
      ni autostash. Revisá el estado y corregí la causa explícitamente.
+   - `PINNED <vps> installed=<c12> target=<t12>` en el resumen (el peer dijo
+     `SYNC_PINNED`; propagador de T+2, C8 · L051) → ese VPS tiene el motor de
+     Integrity y el target **no es su generación instalada**: no se movió nada,
+     ni Git, ni user-level, ni runtime. En los VPS con motor es el resultado
+     **normal**, no una falla: cuenta como `skip` (no suma warning ni error). El
+     contenido nuevo llega con el `setup-integrity.sh --apply` de esa generación
+     que tipea el operador. **No** se reintenta ni se «arregla» con otro comando.
+   - `SYNC_STAGED <sha> … SETUP_MUST_FOLLOW_NOW` → sólo con
+     `--stage-for-setup=<vps>`: el Git de ese host avanzó y nada más. El setup de
+     ESE target en ESE host tiene que seguir ahora; si no, el host queda con el
+     clon movido y el motor viejo (L051). Ese flag nunca lo usa esta skill: es un
+     paso del setup de la generación, con 0 operaciones pendientes medidas.
    - `SYNC_ERROR <causa>` → una postcondición o la reconciliación
      user-level/runtime falló. Puede que Git ya haya llegado al target, pero el
      host **no** cuenta como sincronizado; corregí la causa y reintentá el mismo

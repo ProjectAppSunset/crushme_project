@@ -1,6 +1,6 @@
 ---
 name: "client-message"
-description: "Redacta el par correo + mensaje de WhatsApp para avisarle algo a un cliente: envío de un documento, entrega o aprobación ya resuelta. El correo lleva asunto y cuerpo completo; el WhatsApp es breve. Opcionalmente genera el reporte de cambios y guarda ese mismo par como nota privada del documento en el Gestor. Si no se pasa el tema, pregunta proponiendo lo último trabajado. Para analizar y responder un mensaje entrante usa client-response. Devuelve texto en español para copiar y pegar; no envía nada."
+description: "Redacta el par correo + mensaje de WhatsApp para avisarle algo a un cliente (envío de un documento, entrega o aprobación ya resuelta) o pedirle información; lo sensible va por enlace seguro de ProjectApp. Opcionalmente genera el reporte de cambios y guarda ese par como nota privada del documento en el Gestor. Si no se pasa el tema, pregunta proponiendo lo último trabajado. Para responder un mensaje entrante usa client-response. Devuelve texto en español para copiar y pegar; no envía nada."
 ---
 
 # Client Message — el correo + el WhatsApp para el cliente
@@ -277,6 +277,65 @@ Ahí vas a encontrar:
 **Ambos textos van en bloques de código con texto plano, sin markdown de énfasis
 adentro** — los asteriscos salen literales al pegarlos en Gmail y en WhatsApp.
 
+### Información sensible → enlace seguro de un solo uso
+
+ProjectApp tiene **enlaces seguros de un solo uso** y esta skill sigue el patrón de
+$client-response. Aplica cuando el aviso le **pide** al cliente o le **entrega**
+un dato sensible: contraseñas o claves, llaves API o tokens, accesos a servidor,
+hosting, dominio o base de datos, archivos `.env`, datos bancarios, códigos 2FA o
+de recuperación, o un comunicado confidencial. Ese dato **nunca** va en el correo
+ni en el WhatsApp, y **tampoco pasa por esta conversación** (regla del fleet R34,
+«ningún secreto en el chat»): la skill no lo pide, no lo recibe ni lo repite,
+aunque la descripción de una herramienta sugiera pedírselo al operador. La URL
+del ambiente, el rol y el usuario o correo de una cuenta de pruebas sí van en el
+texto; la clave, no.
+
+- **Pedirle un dato sensible** (nos lo manda el cliente): el párrafo 3 del correo
+  le indica la página pública `https://projectapp.co/es-co/secure-link` y le pide
+  que nos envíe el enlace que genere ahí; sólo nuestro equipo podrá abrirlo. No
+  se crea nada y no se pregunta nada.
+- **Entregarle un dato sensible** (se lo mandamos nosotros): el equipo crea el
+  enlace en `/panel/secure-links` y en el chat pega **sólo la URL**, que va en el
+  correo donde se nombra ese dato. La skill no llama `create_secure_link`: exige
+  el contenido como parámetro y lo dejaría en el transcript. Para orientar al
+  equipo puede indicar el tipo y los nombres de campo de `list_secure_link_types`
+  y un título sin el secreto, que el cliente verá al abrirlo; en «Configuración»,
+  que lo asocie al cliente o al proyecto. Para revisar el contenido, el equipo usa
+  «Ver contenido» en el detalle del panel: abrir la URL y pulsar «Ver contenido»
+  gasta el enlace, aunque lo haga alguien del equipo.
+- **Sin la URL todavía:** el correo lleva `[ENLACE SEGURO: <título>]` y «Datos que
+  faltan» dice cómo cerrarlo: crear el enlace en `/panel/secure-links` y pegar sólo
+  la URL. Si la regla 7 del gating ya pide hechos, va en esa misma petición. El
+  marcador cuenta como `[…]` para la guardrail 16: con él, el veredicto nunca es 🟢.
+- **Con reporte** (Phase 4): un solo enlace por dato. La URL, o el marcador, entra
+  en la nota de $client-report (su Phase 3C) y estos textos la llevan tal cual.
+- **Si un secreto igual llega al chat** (lo pega el operador o viene en claro en un
+  hilo de Gmail), no se usa, no se copia ni se cita: se avisa en una línea que
+  quedó en el transcript y que rotarlo lo decide el operador.
+- **Del enlace sólo se informa** el título y, si se ubicó con `list_secure_links`
+  (filtrado por un `client_id` o `project_id` ya confirmado) o `get_secure_link`,
+  id, tipo y vencimiento: ninguna de las dos devuelve la URL ni el contenido.
+  `mark_secure_link_sent` sólo en un turno posterior, si el operador afirma que ya
+  compartió ese enlace: registra, no envía.
+
+**Texto para el cliente.** El enlace y su explicación van en el correo; el WhatsApp
+sólo avisa que están ahí, sin URL (regla de URLs de esta fase). Cada texto va en una
+sola línea física; los ejemplos usan `usted`, el tratamiento por defecto del perfil:
+
+```
+Correo, pedido:
+Por seguridad, le pedimos no enviarnos <el dato> por correo ni por WhatsApp: ingrese a https://projectapp.co/es-co/secure-link, cree allí un enlace seguro con la información y envíenos ese enlace respondiendo este correo. Solo nuestro equipo podrá abrirlo.
+
+Correo, entrega:
+Le compartimos <el dato> en este enlace seguro: <URL>. El enlace se abre una sola vez: al abrirlo, copie la información. Si lo abre por error o se le vence, avísenos y lo reactivamos.
+
+WhatsApp, pedido:
+En el correo le explico cómo enviarnos <el dato> de forma segura; por favor no lo comparta por este chat.
+
+WhatsApp, entrega:
+Le dejé en el correo un enlace seguro con <el dato>; se abre una sola vez.
+```
+
 ---
 
 ## Persistencia — perfil de firma y coordenadas
@@ -349,6 +408,12 @@ sirve en todos lados. `sync-shared-skills.sh` **no toca `config/`**.
 17. **Una sola versión cuando hay reporte:** el asunto, cuerpo y WhatsApp del output
     son exactamente los tres campos enviados al Gestor. Si la publicación fue
     omitida o falló, se devuelven igual pero se declara que no quedaron persistidos.
+18. **Ningún secreto en los textos ni en el chat** (R34). Claves, llaves, accesos y
+    datos bancarios van sólo en un enlace seguro que el equipo crea en
+    `/panel/secure-links`; a la conversación llega sólo su URL (Phase 6). La skill
+    no llama `create_secure_link` ni pide el contenido; `mark_secure_link_sent`
+    registra, no envía, y sólo corre en un turno posterior con la afirmación del
+    operador.
 
 ---
 
@@ -382,6 +447,8 @@ Asunto: <…>
 
 <Si hubo reporte: UNA línea con la ruta local, el destino en el Gestor y el estado de la nota privada.>
 
+<Si el correo lleva un enlace seguro: UNA línea con su título y, si se ubicó, id, tipo y vencimiento — o «pendiente: crear en /panel/secure-links y pegar sólo la URL»; nunca el contenido.>
+
 🟢 client-message OK — correo + WhatsApp listos para copiar
 ````
 
@@ -405,3 +472,4 @@ menú post-run es exactamente el ruido que la excepción existe para evitar.
 - Protocolo de salida y gating de preguntas: $output-protocol §2 y §4
 - Schema del perfil y de los overrides: `config/client-comms/README.md`
 - Precedente del diseño de persistencia: `config/qa-memory/README.md`
+- Enlaces seguros, mismo patrón: $client-response («Información sensible → enlace seguro de un solo uso»)
