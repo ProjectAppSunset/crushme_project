@@ -1,6 +1,6 @@
 ---
 name: "qa"
-description: "QA conductor for a project: after a feature or fix is functionally complete, close and validate its test coverage end to end. Refreshes the E2E flow map, audits coverage (junk-only first), fans out backend / frontend-unit / e2e subagents to author tests to the 3-part definition of done, runs the quality gate, purges junk via test-audit, and lands the tests on the correct branch — never merging. Default dry-run; --apply to write and commit. From the toolkit, --all-repos / --all-vps run an analysis-only QA sweep of the fleet. Use when the operator says 'QA this', 'cover/validate the tests', 'self-QA', or has just finished a feature — NOT on every trivial edit."
+description: "QA conductor for a project: after a feature or fix is complete, close and validate its test coverage. Refreshes the E2E flow map, audits coverage (junk-only first), fans out backend / frontend-unit / e2e subagents to the 3-part DoD, runs the quality gate, purges junk and lands the tests on a session branch — never merging. Default dry-run; --apply writes. --all-repos / --all-vps: analysis-only fleet sweep. Use when the operator says 'QA this' or just finished a feature, not on trivial edits."
 ---
 
 # QA — the conductor
@@ -18,14 +18,15 @@ los cambios aplicados, regresiones, autorización/secretos/pérdida de datos o r
 obligatorios incumplidos. Cobertura porcentual o complejidad de un test por sí solas
 no justifican otra ronda; el test debe detectar un bug concreto según el DoD existente.
 
-La limpieza extra que no afecta esa validación puede diferirse si su beneficio es menor
-y su esfuerzo/riesgo supera `S`/`low`. Guardar motivo y evidencia, junto a la condición
+La limpieza extra que no afecta esa validación se difiere salvo que su registro validado
+supere el umbral del contrato (en una ronda de mejora, como candidato del frente QA).
+Guardar motivo y evidencia, junto a la condición
 que la reabriría; beneficio desconocido necesita evidencia, no demuestra suficiencia.
 El mensaje «Conviene parar en QA para <alcance>: <evidencia y motivo>» sólo corresponde
 cuando todas las obligaciones de ese alcance pasaron. Un test sin ejecución, un draft
 E2E, una capa bloqueada o trabajo fuera del cupo nunca se declara validado o agotado.
 
-## Modo delegado: una validación combinada de improvement-pass
+## Modo delegado por improvement-pass: un cierre por rama y el frente QA
 
 `IMPROVEMENT_CONTEXT` de $improvement-pass aporta `conductor`, `round_id`, `project`,
 `codebase`, `projdir`, `branch`, `base`, `candidate_ids`, `allowed_paths`, `mode` y
@@ -45,9 +46,18 @@ Reemplazar en este modo las llamadas al engine por sus variantes con
 `--projdir=<worktree literal>` para auditar **el mismo árbol**. Agregar
 `--run-id=<round_id literal>` a `--check`/`--verify`, no a `--preflight` ni `--gate-hook`.
 El conductor de improvement conserva Git: QA devuelve tests staged, resultado por
-candidate/brief item y bloqueos; el conductor commitea y publica. El cierre único combina
-$security-pass, $maintainability-pass, $observability-pass, $perf-pass y
-$responsive-pass, no cinco rondas independientes. Este contrato prevalece sobre los
+candidate/brief item y bloqueos; el conductor commitea y publica. Hay un cierre de QA
+por rama, con los guiones de los frentes que esa rama contiene ($security-pass,
+$maintainability-pass, $observability-pass, $perf-pass, $responsive-pass o
+los candidatos del propio frente QA): uno en el modo por frente, varios en el modo de
+una rama. Nunca se combinan ramas ni se valida el diff de otra; cada cierre usa la
+ronda del motor de su rama (`<ronda>-<frente>`, o `<ronda>-compartido` en el modo de una
+rama). En un host con el motor de integridad (`/usr/local/sbin/vps-integrity`), toda
+corrida de pruebas del cierre lleva un `TMPDIR` literal bajo `~/.cache` (falla cerrada
+bajo `/tmp`, `/var/tmp` o `/dev/shm`) y corre de a una bajo el candado común
+(`flock` sobre `~/.cache/vps-ops-toolkit/locks/test-run.lock`), y los reportes de
+`qa-agent.sh` van fuera del clon fijado del toolkit: `--report-dir=<docs/audits del clon
+privado>` o `--no-report`. Este contrato prevalece sobre los
 pasos de apertura/landing de las fases 0 y 7; las guardas de producción, calidad y
 autoría por capa siguen vigentes. Sin contexto se conserva el flujo independiente.
 
@@ -55,7 +65,9 @@ Cada guion incorpora `round_id`, candidate ID, capa, comportamiento, entrada, va
 concreto esperado, bug y referencias leídas. El Architect re-verifica todos los guiones,
 unifica los que prueban el mismo comportamiento y conserva la asociación a cada
 candidato. Se prioriza validar los cambios aplicados y sus casos negativos; luego las
-obligaciones detectadas. La deuda adicional queda separada bajo la política de beneficio.
+obligaciones detectadas. La deuda adicional sólo entra como candidato del frente QA
+validado y seleccionado (ver «Frente QA»); el resto queda separado bajo la política de
+beneficio.
 Todo candidate ID asignado termina con resultado explícito; no desaparece al deduplicar.
 
 ### Evidencia estructurada de la ronda
@@ -112,6 +124,69 @@ Si cambia el commit, queda diff o se arregla un test, actualizar la ronda y repe
 comprobaciones afectadas antes de asociar una verificación. Errores, falta de ejecución o
 E2E sin app dejan la ronda pendiente/rechazada; nunca escribir `verified` manualmente.
 
+### Frente QA (diagnóstico en una ronda de mejora)
+
+En una ronda de $improvement-pass QA cumple dos papeles que no se mezclan: el cierre
+de cada rama (arriba) y el **frente QA** (`mode: discover|check`), que diagnostica deuda
+de tests **preexistente** y la registra con el «Protocolo de validación de candidatos»
+del contrato común. El diagnosticador del frente corre sólo las fases 0–2, parte de la
+salida de `qa-agent.sh --check` que le pasa el orquestador, no despacha roles ni escribe
+en el proyecto; si hay que escribir el flow-map o el Memory Bank, lo hace un rol
+subagente. Una sola lista de causas:
+
+- flows `junk-only`;
+- flows P1/P2 sin cobertura calificada (`missing`, o `partial` con una clase de outcome
+  declarada sin test que califique, primero `error`/`failure`);
+- clases negativas faltantes;
+- duplicados (`duplicate_coverage`).
+
+Cobertura porcentual, complejidad o drafts `unvalidated` no son candidatos: los drafts
+siguen siendo trabajo de la fase 5b. Un test inestable sólo es candidato con
+reproducción local; si no, queda `needs_validation`.
+
+El verificador de un candidato QA es un subagente fresco y genérico, de sólo lectura,
+que no participó del ranking ni de la autoría (no `qa-auditor`); lo lanza el
+orquestador. Sin verificador rige «Sin subagentes, sin verificador o sin crítico» del
+contrato. Misma causa raíz = el mismo spec o helper que descalifica varios flows, o la
+misma clase ausente en un flow. El verificador re-lee los specs y tests citados y trata
+de refutar:
+
+1. **Evidencia de esta corrida y de este árbol.** Los ids salen de la auditoría del mismo
+   worktree y SHA (`junk_only_flows`, `missing_flows`, `negative_case_gaps`,
+   `<suite>_error_files`); memoria, reportes de otra ronda o un gate que escaneó cero
+   archivos no cuentan. Puede repetir sólo lectores sin escritura (p. ej.
+   `flow_coverage_audit.py --repo-root <worktree>`); nunca `--check` ni `--verify`.
+2. **`junk-only` real.** Cada test del flow cae en una regla que descalifica
+   (`no_user_interaction` o `flow_tag_mismatch`), resolviendo helpers de forma transitiva:
+   un spec que factoriza sus clicks en un helper no es basura.
+3. **Hueco real.** El flow existe en el registro con esas `outcomes`, no es `exempt` y
+   ningún test calificado cubre la clase declarada.
+4. **Duplicado real.** Mismo flow, outcome y aserción; un contrato por viewport con
+   `allow-duplicate (per-viewport contract: …)` no es duplicado.
+5. **Bug nombrable.** Se puede escribir qué bug atraparía el test (punto 3 del DoD); si no,
+   es abstención declarada, no candidato.
+6. **Gate al día.** Si el gate del repo es un fork viejo del core, decidir contra el core
+   canónico y declarar la divergencia.
+
+Anclas de impacto, subordinadas a la escala del contrato: `junk-only`, `missing` o clase
+`error`/`failure` ausente en un flow P1/P2 ⇒ ALTO; lo mismo en P3/P4 ⇒ MEDIO; duplicado o
+hallazgo débil ⇒ BAJO (`marginal`). Dentro de cada nivel, `junk-only` primero: un falso
+verde es peor que un hueco honesto.
+
+**Sin duplicar.** Lo que ya es validación de un cambio aplicado en la ronda no se abre como
+candidato QA; un test que sirve a los dos papeles se escribe una vez y lleva todos sus
+candidate IDs.
+
+**Ledger de cobertura del frente QA.** Una unidad por capa × clase (junk-only, faltantes
+P1/P2, clases negativas, inestables), con el esquema del ledger de cobertura del
+contrato: en `unit`, `layer` y `class`; sus chequeos nombran el comando literal y el SHA
+auditados y los archivos que escaneó el gate. Una capa sin examinar (sin infra,
+`analysis=degraded`, sin app para validar en vivo) queda `deferred` con su razón; una capa
+con cero archivos escaneados nunca es sana.
+
+Fuera de una ronda, la QA independiente conserva su protocolo, cuyo Verifier ejecuta; no
+valida su worklist con un verificador del Protocolo.
+
 ## Cómo invocar este skill
 
 Gating ($output-protocol §4): (1) explicit flags → run direct, no menu;
@@ -149,7 +224,7 @@ reimplement it.
 - `qa-agent.sh --preflight <proj>` → scope: layers, db engine, staging/production,
   `fake_data_allowed`, abstain decision, and the work coordinate.
 - `qa-agent.sh --check <proj>` → coverage audit + quality gate → worklist counts,
-  verdict, and a `docs/audits/<date>-<proj>-qa.md` report.
+  verdict, and a `<date>-<proj>-qa.md` report (default: the toolkit's `docs/audits/`).
 - `qa-agent.sh --verify <proj> --files=a,b` → re-run the gate on touched files,
   **with `--junk-severity=error` (CI parity)**. A gate that scans ZERO files is a
   false-clean and exits 2 — never a pass. On a clean pass it clears the marker.
@@ -165,6 +240,10 @@ reimplement it.
   `--verification=<path.json>` adjunta evidencia estructurada de ejecuciones reales
   asociadas a esa ronda/commit en `--verify` con `--run-id`/`--projdir`; no ejecuta
   tests por su cuenta. `--run-id` sólo aplica a `--check`/`--verify`.
+- `--report-dir=<dir>` escribe el reporte en ese directorio y `--no-report` no escribe
+  ninguno (sólo stdout); son excluyentes. Con el motor de integridad presente, un
+  destino dentro del clon fijado `~/webapps/vps-ops-toolkit` se rechaza (exit 2) y el
+  default pasa a `${XDG_STATE_HOME:-~/.local/state}/vps-ops-toolkit/qa-reports`.
 
 ## Roles — dedicated subagents (dispatch by `subagent_type`)
 
@@ -636,6 +715,7 @@ Reportar siguiendo $output-protocol. Plantilla específica de `$qa`
 | Healer | ⏭️ | N tests reparados (≤3 intentos c/u) · 0 cambios a código prod |
 | Junk purge (test-audit) | ⏭️ | dry-run: N candidatos DELETE/MERGE, sin aplicar |
 | Land | ✅ | rama qa/<fecha>-<slug> + PR base=<resolved_branch>; sin merge (drena `$merge-queue`) |
+| Frente QA (sólo en ronda de mejora) | ℹ️ | confirmed N · needs_validation N · rejected N · capas no examinadas con razón · estado del frente: MADURO / NO VALE LA PENA / VALE LA PENA / BLOQUEADO / FALTA EVIDENCIA |
 
 ## Next steps
 - `bash $HOME/webapps/vps-ops-toolkit/scripts/qa/qa-agent.sh --verify <proj> --files=<spec>` — reconfirmar el gate
@@ -664,3 +744,7 @@ Casos de veredicto:
 
 En modo fleet, anteponer una columna `Host`/`Proyecto` y, si hay >15 filas, un
 `### Top 3 acciones prioritarias` (junk-only + P1 sin cobertura) antes de la tabla.
+
+## Referencias externas
+
+- https://github.com/cloudflare/security-audit-skill · commit c1c8a8c1471069fb0e188eeaff69b8e8db6564a8 · revisado 2026-10-10 · Adaptado de cloudflare/security-audit-skill (MIT) · el frente QA de improvement-pass y la validación de sus candidatos

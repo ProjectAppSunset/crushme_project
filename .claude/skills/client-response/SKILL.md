@@ -1,7 +1,7 @@
 ---
 name: client-response
 description: "Analiza mensajes entrantes de clientes y prepara una respuesta fundamentada, sin mezclar etapas ni ampliar el alcance. El operador elige cómo guardarla en ProjectApp: documento con correo y WhatsApp en sus notas privadas, o solo borradores de comunicaciones. Nunca genera ambas salidas, envía mensajes ni implementa cambios. Para avisos salientes simples usa client-message."
-allowed-tools: Bash, Read, Write, AskUserQuestion, mcp__imap-mailbox__imap_list_folders, mcp__imap-mailbox__imap_search, mcp__imap-mailbox__imap_read_message, mcp__claude_ai_Gestor_de_Documentos__list_folders, mcp__claude_ai_Gestor_de_Documentos__list_documents, mcp__claude_ai_Gestor_de_Documentos__read_document, mcp__claude_ai_Gestor_de_Documentos__create_folder, mcp__claude_ai_Gestor_de_Documentos__create_document, mcp__claude_ai_Gestor_de_Documentos__update_document, mcp__claude_ai_Gestor_de_Clientes__search_clients, mcp__claude_ai_Gestor_de_Clientes__list_clients, mcp__claude_ai_Gestor_de_Clientes__get_client, mcp__claude_ai_Gestor_de_Clientes__create_client, mcp__claude_ai_Gestor_de_Comunicaciones__list_threads, mcp__claude_ai_Gestor_de_Comunicaciones__get_thread, mcp__claude_ai_Gestor_de_Comunicaciones__create_thread, mcp__claude_ai_Gestor_de_Comunicaciones__create_message, mcp__claude_ai_Gestor_de_Comunicaciones__update_message, mcp__claude_ai_Gestor_de_Comunicaciones__mark_message_sent, mcp__claude_ai_Gestor_de_Comunicaciones__list_secure_link_types, mcp__claude_ai_Gestor_de_Comunicaciones__create_secure_link, mcp__claude_ai_Gestor_de_Comunicaciones__get_secure_link
+allowed-tools: Bash, Read, Write, AskUserQuestion, mcp__imap-mailbox__imap_list_folders, mcp__imap-mailbox__imap_search, mcp__imap-mailbox__imap_read_message, mcp__claude_ai_Gestor_Documental__list_folders, mcp__claude_ai_Gestor_Documental__list_documents, mcp__claude_ai_Gestor_Documental__read_document, mcp__claude_ai_Gestor_Documental__create_folder, mcp__claude_ai_Gestor_Documental__create_document, mcp__claude_ai_Gestor_Documental__update_document, mcp__claude_ai_Gestor_de_Comunicaciones__list_threads, mcp__claude_ai_Gestor_de_Comunicaciones__get_thread, mcp__claude_ai_Gestor_de_Comunicaciones__create_thread, mcp__claude_ai_Gestor_de_Comunicaciones__create_message, mcp__claude_ai_Gestor_de_Comunicaciones__update_message, mcp__claude_ai_Gestor_de_Comunicaciones__mark_message_sent, mcp__claude_ai_Gestor_de_Comunicaciones__list_secure_link_types, mcp__claude_ai_Gestor_de_Comunicaciones__list_secure_links, mcp__claude_ai_Gestor_de_Comunicaciones__get_secure_link, mcp__claude_ai_Gestor_de_Comunicaciones__mark_secure_link_sent
 argument-hint: "[--email <UID|búsqueda> | --whatsapp <mensaje pegado> | contexto libre]"
 ---
 
@@ -305,22 +305,30 @@ Contraseñas, credenciales, llaves API/tokens, accesos a servidor o base de dato
 `.env`, datos bancarios, códigos 2FA o un comunicado confidencial **nunca** se
 pegan en el correo, el WhatsApp, el documento formal ni las notas privadas. Van en
 un enlace seguro de ProjectApp (se abre una sola vez, vence y el equipo puede
-reactivarlo):
+reactivarlo). **Tampoco pasan por esta conversación** (regla del fleet R34,
+«ningún secreto en el chat»): la skill no los pide, no los recibe ni los repite,
+aunque la descripción de una herramienta sugiera pedírselos al operador.
 
-- Si la respuesta debe **entregar** un secreto y el operador ya lo dio en la
-  conversación, propón en el lote de Fase 7 un `create_secure_link` con ese
-  contenido exacto (tipo del catálogo `list_secure_link_types`). Nunca inventes,
-  completes ni deduzcas un valor secreto.
-- Si el secreto **no** está en la conversación, pídeselo al operador antes de
-  cerrar la propuesta de mutación; no crees el enlace vacío ni con marcadores.
+- Si la respuesta debe **entregar** un secreto, el equipo crea el enlace en
+  `/panel/secure-links` y en el chat pega **sólo la URL**. La skill no llama
+  `create_secure_link`: exige el contenido en `fields` y lo dejaría en el
+  transcript. Para orientar al equipo puede indicar el tipo y los nombres de campo
+  de `list_secure_link_types` y un título sin el secreto, que el cliente verá al
+  abrirlo; en «Configuración», que lo asocie al cliente o al proyecto.
+- Si el enlace todavía no existe, pídele al operador, antes de cerrar la propuesta
+  de mutación, que lo cree en el panel y pegue sólo la URL; nunca el contenido.
+- Si un secreto igual llega al chat (lo pega el operador o viene en claro en el
+  mensaje del cliente), no se usa ni se repite: se omite con […] y se avisa en una
+  línea que quedó en el transcript y que rotarlo lo decide el operador.
 - Si el **cliente** debe enviarnos algo sensible, incluye la página pública
   `https://projectapp.co/es-co/secure-link` (en inglés: `/en-us/secure-link`) y
   pídele que nos mande el enlace que genere; sólo el equipo podrá abrirlo.
 - El texto al cliente dice que el enlace se abre **una sola vez**, que copie la
-  información al abrirlo y que, si lo abre por error, nos avise para
+  información al abrirlo y que, si lo abre por error o se le vence, nos avise para
   reactivarlo. En los textos del output el enlace aparece como
-  `[ENLACE SEGURO: <título>]` hasta que el lote confirmado devuelva la URL real;
-  los borradores persistidos llevan la URL real.
+  `[ENLACE SEGURO: <título>]` hasta que el operador pegue la URL; los borradores
+  se guardan con la URL o, si el operador lo elige en la Fase 7, con el marcador
+  y veredicto 🟡.
 
 ## Fase 7 — persistencia en ProjectApp
 
@@ -329,28 +337,30 @@ la salida elegida, IDs/nombres resueltos, contenido y operaciones necesarias:
 
 | Operación | Documento con notas | Solo comunicaciones |
 |---|---|---|
-| Crear cliente si falta | Solo con datos y autorización suficientes | Solo con datos y autorización suficientes |
+| Crear cliente si falta | No: la sesión no tiene conector de clientes; queda pendiente | No: la sesión no tiene conector de clientes; queda pendiente |
 | Crear carpeta documental si falta | Solo en el destino autorizado | No |
 | Crear o actualizar documento y notas | Sí | No |
 | Crear hilo si falta | No | Solo para el contexto confirmado |
 | Registrar entrante real que falta | No | Sí, si hay fuente verificable |
 | Crear borradores de correo y WhatsApp | No; los textos quedan en el documento | Sí, en el hilo confirmado |
-| Crear enlaces seguros necesarios | Cuando estén autorizados | Cuando estén autorizados |
+| Enlaces seguros | No los crea: el equipo los crea en `/panel/secure-links`; el lote usa la URL pegada o el marcador | No los crea: el equipo los crea en `/panel/secure-links`; el lote usa la URL pegada o el marcador |
 
 Si el operador ya autorizó ese destino, contenido y operaciones en esta tarea,
 ejecuta sin repetir la confirmación. Si el lote incluye algo no autorizado, muestra
 el delta y pide confirmación antes de esa escritura. Elegir una salida no autoriza
-por sí solo crear un cliente, carpeta, hilo o enlace que no se haya resuelto.
+por sí solo crear una carpeta o un hilo que no se haya resuelto.
 
 Una confirmación cubre ese lote exacto. No duplica la aprobación ya concedida ni
 autoriza cambios posteriores de cliente, destino o contenido fuera de ese lote.
 
 ### Cliente e hilo
 
-- Busca por empresa, contacto y correo. No crea duplicados por diferencias de
-  mayúsculas, tildes o abreviaturas.
-- Si falta el cliente, propone `create_client` con los datos verificables; los datos
-  desconocidos se omiten.
+- Busca por empresa, contacto y correo con `list_threads` (`q`); el `client_id` vale
+  sólo si un hilo o documento existente del mismo cliente lo confirma. No crea
+  duplicados por diferencias de mayúsculas, tildes o abreviaturas.
+- Si el cliente no aparece, no se crea desde esta skill (la sesión no tiene un
+  conector de clientes): queda pendiente para el equipo, igual que las escrituras
+  que lo exigen (`create_thread` pide `client_id`).
 - Las escrituras de hilo y entrante siguientes aplican únicamente a
   **Solo comunicaciones**; en **Documento con notas**, los hilos son solo fuentes
   de lectura.
@@ -400,14 +410,23 @@ autoriza cambios posteriores de cliente, destino o contenido fuera de ese lote.
 
 ### Enlaces seguros
 
-- `create_secure_link` recibe `secret_type`, `title` (etiqueta interna, sin el
-  secreto), `fields` con el contenido exacto que dio el operador, `client_id`,
-  `project_id` si pertenece al cliente, `language` del cliente y
-  `validity_days` (7 por defecto; 1, 3, 7 o 30).
-- La URL se entrega **una sola vez** en esa respuesta: reemplaza el marcador
-  `[ENLACE SEGURO: <título>]` por esa URL en ambos borradores antes de crearlos.
-  `list_secure_links`/`get_secure_link` nunca la devuelven; si se pierde, el
-  equipo la copia desde `/panel/secure-links`.
+- El equipo crea el enlace en `/panel/secure-links`. La skill no llama
+  `create_secure_link` ni `create_platform_secure_link`: las dos exigen el
+  contenido en `fields`. Sugiere el tipo de `list_secure_link_types`, un título
+  sin el secreto (el cliente lo ve al abrir el enlace), el idioma del cliente y,
+  en «Configuración», el cliente o el proyecto: sin ellos `list_secure_links` no
+  lo encuentra.
+- Para revisar el contenido, el equipo usa «Ver contenido» en el detalle del
+  panel, que no gasta el enlace; abrir la URL y pulsar «Ver contenido» sí lo
+  gasta, aunque lo haga alguien del equipo.
+- Con la URL que pegó el operador, reemplaza el marcador `[ENLACE SEGURO: <título>]`
+  en ambos borradores antes de crearlos. `list_secure_links` (con el `client_id` o
+  el `project_id` ya confirmados) y `get_secure_link` ubican el enlace y su estado;
+  nunca devuelven la URL ni el contenido. Si la URL se pierde, el equipo la copia
+  desde `/panel/secure-links`.
+- **Nunca** llama `mark_secure_link_sent` durante la preparación. Sólo puede usarla
+  en un turno posterior si el operador afirma que ya compartió ese enlace por fuera
+  de ProjectApp; registra el hecho, no envía nada.
 - El contenido del secreto no se repite en el output, el documento, las notas
   privadas ni el resumen final: sólo título, tipo, id y vencimiento.
 - Reactivar un enlace es una decisión del equipo desde el panel; esta skill sólo
@@ -420,12 +439,13 @@ autoriza cambios posteriores de cliente, destino o contenido fuera de ese lote.
 - En **Solo comunicaciones**, sin Gestor de Comunicaciones devuelve los textos y
   declara qué borradores no se crearon. No crea un documento como reemplazo.
 - La ausencia del conector no usado por la salida elegida no impide guardarla.
-  Solo requiere Gestor de Clientes si debe resolver o crear un cliente.
+  Sin conector de clientes, el cliente se resuelve con hilos y documentos
+  existentes; si no aparece, no se crea y la escritura que lo exige queda pendiente.
 - Sin IMAP: para correo pide que el operador pegue el mensaje/hilo; para WhatsApp
   sigue normalmente.
-- Sin `create_secure_link`: deja `[ENLACE SEGURO: <título>]` en los textos, indica
-  que el equipo debe crearlo en `/panel/secure-links` y el veredicto es 🟡. Nunca
-  pega el secreto como alternativa.
+- Sin la URL del enlace (el equipo todavía no lo creó en `/panel/secure-links`):
+  los textos llevan `[ENLACE SEGURO: <título>]` y el veredicto es 🟡. Nunca pide
+  ni pega el secreto como alternativa.
 - Nunca afirma «creado», «actualizado», «guardado» o «enviado» sin resultado MCP.
 
 ## Guardrails
@@ -442,8 +462,9 @@ autoriza cambios posteriores de cliente, destino o contenido fuera de ese lote.
 9. No crear ni actualizar nada por MCP sin autorización del lote concreto. Respeta
    la autorización ya concedida; pide confirmación solo para lo que no cubre.
 10. No duplicar mensajes, clientes, hilos o documentos existentes.
-11. No escribir secretos en correos, WhatsApp, documentos ni notas: van sólo en un
-    enlace seguro creado con el contenido que dio el operador.
+11. No escribir secretos en correos, WhatsApp, documentos ni notas, ni pedirlos o
+    repetirlos en la conversación: van sólo en un enlace seguro que el equipo crea
+    en `/panel/secure-links`; a la conversación llega sólo su URL.
 12. No redactar en futuro un cambio que el operador decidió implementar y enviará
     después de desplegar: se describe como entregado y con sus pasos de validación.
 13. No citar ni parafrasear al cliente sin marcarlo entre paréntesis (en cursiva

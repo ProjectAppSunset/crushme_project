@@ -1,0 +1,7 @@
+interface:
+  display_name: "Platform Delivery Authoring"
+  short_description: "Prepara fases, etapas y guías de validación de Platform..."
+  default_prompt: "Use $platform-delivery-authoring to handle this task with its documented workflow."
+
+policy:
+  allow_implicit_invocation: true

@@ -82,16 +82,32 @@ PREPARE — antes de publicar; un fallo intenta descartar y abortar
   → operation-begin(type=deploy, target=<SHA completo>) + ledger 0600
   → dump pre-deploy SIEMPRE (MySQL/PostgreSQL/SQLite)
   → checkout del target en un STAGE fuera del árbol vivo (mismo filesystem,
-    sin tocar .git); node_modules se copia por hardlinks, .env se enlaza
-  → pip + npm por los brokers (publican en los venv/node_modules vivos, atómico)
+    sin tocar .git); .env se enlaza
+  → prepare-pip + prepare-npm por los brokers: entornos nuevos del target,
+    sandbox/pip check/YARA, candidatos root-private y receipts prepared (M2)
+  → export-pip/export-npm: copia de bytes validada en el stage, sin writes root
+    a rutas del caller ni inodos compartidos con el árbol vivo
   → build del frontend + collectstatic DENTRO del stage, con guards:
     nada escrito en el árbol vivo, nada fuera de build_artifacts, STATIC_ROOT
     bajo el stage, ningún archivo trackeado modificado
-  → ensayo de migraciones sobre <db>_rehearsal, copia real cargada desde el dump
+  → ensayo de migraciones sobre <db>_rehearsal, copia real cargada desde el dump;
+    cuenta lo que escribe en el MEDIA_ROOT del stage y frena si llega al umbral
+    MASS del host menos 50 (sin ensayo: escaneo estático de las migraciones)
+  → guard de timers: un timer del proyecto que dispara dentro de la ventana del
+    COMMIT (DEPLOY_TIMER_GUARD_S, 3600 s) frena antes de abrir y antes del quiesce
 COMMIT — ventana corta; un fallo de publicación dispara el rollback
-  → migrate real desde el stage (el árbol vivo sigue intacto)
+  → quiesce-deploy: detener las units de aplicación selladas, verificar PIDs/cgroups
+  → operation-deps publish: conjunto completo, runtime detenido, intercambio
+    atómico de dependencias, receipts exactos y barrera del watcher
+  → G-A5: settle hasta que la decisión MASS de la publicación quede asentada
   → merge --ff-only al target + revalidación de identidad env/DB
   → intercambio atómico (renameat2) de cada build_artifacts: vivo ↔ stage
+  → G-A6: settle con las units paradas, contando el media que midió el ensayo
+    (una muerte acá no tocó la base)
+  → migrate real con el manage.py y el venv VIVOS (T+2-M v5; antes, preflight
+    vivo, venv publicado y sus paquetes = los del stage; journal migrating antes
+    de ejecutar). Lo que escribe en media queda; si falla, se nombra (media=N)
+  → G-A6': settle otra vez (una muerte acá deja la base MIGRADA y lo dice)
   → restart completo → health gate con reintentos (units activas + /api/health/)
   → operation-end y baseline autenticado
   → post-deploy-check + diagnóstico read-only
@@ -128,10 +144,10 @@ migrar, la ventana "base migrada con código viejo" dura segundos.
 
 | Dónde falla | Efecto en la app | Acción automática | Acción del operador |
 |---|---|---|---|
-| Preflight, dump, staging, dependencias, build, `collectstatic`, guards | Sin nueva generación publicada; las dependencias vivas pasan por el broker | Intenta descartar el stage, dropear la copia de ensayo y `operation-abort` (revierte venv/node_modules) | Corregir la causa y repetir; si el abort falla, conservar receipt y revisar el recovery |
+| Preflight, dump, staging, dependencias, build, `collectstatic`, guards | Sin nueva generación publicada; dependencias privadas, sin publicar | Intenta descartar el stage, dropear la copia de ensayo y `operation-abort` (descarta candidatos privados) | Corregir la causa y repetir; si el abort falla, conservar receipt y revisar el recovery |
 | Ensayo de migraciones | La base real no se tocó | Igual que arriba; el log queda en `~/.local/state/vps-ops-toolkit/deploy-ledger/logs/` | Arreglar la migración y comprobar el abort |
 | `migrate` real | Sólo la DB (MySQL no tiene DDL transaccional) | Aborta la operación; código, artefactos y servicios intactos; reporta el dump | Triage de la migración; restaurar el dump **sólo** tras evaluar (`docs/deploy-transaction.md`) |
-| ff-merge, intercambio, restart, health gate | Transitorio | Escalera de rollback: artefactos previos ↔, `reset --hard` a `head_at_open`, dependencias por el broker, restart del código anterior, health, `operation-abort`, `verify` | Leer `DEPLOY[…]: ROLLED-BACK`; la DB queda migrada: decidir con el dump |
+| ff-merge, intercambio, restart, health gate | Transitorio | Escalera de rollback: detener runtime, artefactos previos ↔, `reset --hard` a `head_at_open`, dependencias por el broker, restart del código anterior, health, `operation-abort`, `verify` | Leer `DEPLOY[…]: ROLLED-BACK`; la DB queda migrada: decidir con el dump |
 | Rollback que no consigue restaurar | Puede ser visible | Preserva receipt+escrow, ledger `needs-operator` | `INTEGRITY_OPERATION_RECOVERY=abort` o intervención manual |
 | `operation-end` | Ninguno (ya sano) | Preserva receipt+escrow (cierre ambiguo) | `finish-close`, nunca `abort` |
 | Verificación posterior o limpieza del stage, después de un cierre confirmado | La generación nueva sigue publicada | No revierte un deploy ya cerrado; conserva el resultado y reporta salida de error | Revisar la comprobación fallida o el residuo; no ejecutar rollback por un `COMPLETE` con salida no cero |
@@ -270,3 +286,18 @@ como baseline pendiente; no se omite por haber recuperado la salud.
 - Tras un `ABORTED` por `build_artifacts` sin declarar: copiar la lista de
   `DEPLOY-ARTIFACTS[<proyecto>]:` a `projects.yml` y repetir.
 - Tras un cierre ambiguo: `INTEGRITY_OPERATION_RECOVERY=finish-close …` (arriba).
+
+### Dependencias M2 y recovery anterior
+
+El deploy nuevo guarda `dependency_mode=deferred` y `commit_order=late-migrate` (T+2) en
+el ledger, y receipts schema 2. Un ledger sin `commit_order` (abierto antes de T+2)
+sólo se aborta: su `resume` se rehúsa con guía.
+PREPARE permite upgrades y removals porque no publica bibliotecas bajo código
+viejo. `publish` exige todas las dependencias preparadas y runtime detenido;
+`recover` deja un receipt `prepared` sin publicarlo. El rollback publicado también
+exige quiescence. No sustituir estos pasos por pip/npm manuales.
+
+Un ledger antiguo sin ese campo conserva M1; el caller no puede adoptar receipts
+M2 mediante los verbos inmediatos. Si el ledger quedó en `migrating`, no repetir
+DDL a ciegas: recuperar código/dependencias, comprobar salud y conservar el
+veredicto `NEEDS-OPERATOR phase=migrate`, con dump y evidencia de la DB.

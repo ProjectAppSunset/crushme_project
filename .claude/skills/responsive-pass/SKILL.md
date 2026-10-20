@@ -2,7 +2,7 @@
 name: responsive-pass
 description: "Mejora la responsividad de un módulo o pestaña contra RESPONSIVE_STANDARDS.md, con la matriz de cinco anchos y tableta vertical obligatoria. Usar cuando la interfaz se rompe en celular/tableta o se pide una pasada responsive. Default diagnóstico; --apply corrige layout en la rama de sesión. qa verifica los cambios y el ledger conserva hallazgos y decisiones de beneficio/coste. Excluye rediseños y cambios funcionales."
 argument-hint: "[proyecto] [--module=<id>[/<tab>]] [--apply] [--record-qa] [--uncovered=observe|conservative]"
-allowed-tools: Bash, Read, Edit, Write, Grep, Glob, AskUserQuestion, EnterWorktree
+allowed-tools: Bash, Read, Edit, Write, Grep, Glob, Agent, AskUserQuestion, EnterWorktree
 ---
 
 # Responsive module — un módulo por corrida
@@ -19,13 +19,14 @@ buena a sí misma no está verificando nada.
 Usar `workflows/improvement/IMPROVEMENT_STANDARDS.md` del toolkit antes de aplicar.
 Una acción inaccesible, una regresión o una invariante obligatoria incumplida se corrige
 o se declara bloqueada; nunca se posterga por bajo retorno. Un retoque puramente estético
-sin utilidad concreta no justifica otra pasada. Un beneficio menor sí puede justificarla
-si el esfuerzo es `S`, el riesgo `low` y la mejora para el usuario es comprobable.
+sin utilidad concreta no justifica otra pasada. Que un beneficio menor la justifique lo
+decide el umbral del contrato sobre el registro validado (Fase 2b).
 
 Registrar `value_assessment: {benefit, effort, change_risk, mandatory, reason, evidence}`
-en el ledger: `benefit=material|minor|unknown`, `effort=S|M|L`, `change_risk=low|medium|high`.
-Menor con esfuerzo/riesgo mayor ⇒ `deferred-low-value`; beneficio incierto ⇒ diagnóstico
-con decisión `needs-evidence`, no «suficiente». Si un módulo reúne varios hallazgos,
+en el ledger: `benefit=material|minor|marginal|unknown`, `effort=S|M|L`,
+`change_risk=low|medium|high`. Bajo el umbral del contrato ⇒ `deferred-low-value`;
+`needs_validation` o beneficio incierto ⇒ diagnóstico con decisión `needs-evidence`, no
+«suficiente». Si un módulo reúne varios hallazgos,
 evaluar cada intervención en el reporte y conservar en su registro cualquier obligación
 pendiente: no diferir el módulo entero cuando todavía hay una rotura obligatoria.
 
@@ -44,14 +45,15 @@ Con `IMPROVEMENT_CONTEXT` de [[improvement-pass]], heredar `conductor`, `round_i
 y `owns_git=conductor`. Validar proyecto/worktree/rama/base con
 `session-worktree.sh status` y la pertenencia de sesión/PR al conductor; contexto ajeno
 o incoherente ⇒ bloquear antes de escribir. Se mantiene un módulo/pestaña acotado por
-invocación, dentro del máximo de **tres candidatos globales** de la ronda.
+invocación, dentro del cupo de la ronda: hasta tres candidatos por frente en el modo por
+frente y tres en total en el modo de una rama.
 
 Este contrato prevalece sobre menús, creación de worktree y commits/push/PR de las fases
 siguientes. Inventario previo del conductor se reutiliza como hipótesis con referencias
 verificadas; no se barre la app. Devolver sólo el diff asignado, evaluación de valor,
 flows y `brief-e2e` con `round_id` y candidate ID por ítem. Los hallazgos que pertenecen
 a rendimiento se devuelven al conductor para deduplicar, sin escribir otro ledger ni
-invocar `perf-pass`. Git, registros y el único cierre de QA son del conductor.
+invocar `perf-pass`. Git, registros y el cierre de QA de cada rama son del conductor.
 
 El helper común
 `bash ~/webapps/vps-ops-toolkit/scripts/improvement/improvement-ledger.sh --show <proyecto> --projdir=<worktree>`
@@ -146,7 +148,8 @@ orden, nunca un multiSelect de módulos). `--record-qa` se tipea: es un modo pos
    `fix/<DDMMYYYY>-responsive-<slug>` cortada de la base resuelta; jamás en el clon principal
    ni sobre la release; PR al primer push con `Sesión:`/`Intención:`. **Nunca se mergea.**
 8. **La verificación es de `/qa`.** Esta skill no corre tests ni "verifica" con capturas; el
-   único autocontrol es el guard estático del diff (Fase 4).
+   único autocontrol es el guard estático del diff (Fase 4). La validación independiente del
+   hallazgo (Fase 2b) no verifica la corrección.
 9. **Ledger sin métricas:** estados + pendientes con razón; se re-inventaría cada corrida;
    commit propio en master del toolkit, nunca mezclado con el commit del proyecto.
 
@@ -273,10 +276,63 @@ no, el canónico del toolkit), `project_doc` si existe, y las claves `responsive
 Sin estándar canónico (`no-canonical`): la tabla se entrega sin Invariante/Clase bajo el
 título "Inventario de roturas" y la corrida salta a la Fase 6 con el módulo en `pending`.
 
+## Fase 2b — Validación independiente (Protocolo común)
+
+Validar el hallazgo no es verificar la corrección: eso es el test conductual de §5.2 que
+escribe y corre `/qa`. Antes de la Fase 3, cada hallazgo `corregible` que pueda proponerse
+—y al menos el más fuerte del módulo, aunque la conclusión sea parar— pasa por el
+«Protocolo de validación de candidatos» del contrato común: registro con tres veredictos,
+verificación antes de seleccionar, modalidad `quick` (`standard` automática para
+`mandatory` y `bloqueante`), crítico de cobertura y ledger de cobertura. Sola, la pasada
+lanza un verificador fresco por hallazgo y el crítico del contrato, con las herramientas de
+«Herramientas por host»: `Agent` en Claude Code o `spawn_agent` en Codex; en un VPS del
+fleet, sólo `Agent`. Delegada, no lanza subagentes: los lanza el conductor. Sin verificador
+o sin crítico rige «Sin subagentes, sin verificador o sin crítico» del contrato. Misma
+causa raíz = la misma clase, markup o componente responsable, aunque rompa en varias rutas
+o anchos: un registro con todos los anchos afectados.
+
+El verificador recibe el registro, la matriz ruta × ancho de la Fase 1 y §2–§5 del
+estándar; re-lee cada `file:line` y trata de refutar:
+
+1. **Los cuatro elementos de §5.1:** snapshot o salida de sonda a un alias exacto de §2
+   (PA-75; fuera de la matriz sólo con `responsive_widths`), elemento por selector o
+   `file:line`, invariante de §3 y anchos. Sin observación en vivo es una sospecha:
+   `needs_validation`, nunca `confirmed`.
+2. **El px efectivo.** Con `breakpoints`/`responsive_breakpoints`, la clase citada aplica a
+   ese ancho (trampas de §2: `md:` rige en 835, `rem` de Tailwind v4, variantes custom con
+   su px real) y la lógica JS de viewport exige o no recargar tras `browser_resize`.
+3. **Reproducción local.** Si un `local:<port>` de DEV sirve el mismo código, repetir sólo
+   lectura el mecanismo de la Fase 1b: `browser_resize` al alias, recarga si corresponde,
+   snapshot, sonda de overflow y, en `compact`/`portrait`, la de 44 px; modales sólo desde
+   triggers no mutantes; nunca fill/submit. El verificador no navega staging ni producción;
+   una sonda del descubridor en otro target cuenta sólo si ese target sirve el mismo código
+   de los paths citados, y nunca reemplaza al verificador. En un VPS, lo que exigiría
+   observación en vivo queda `needs_validation` con el plan de [[dev-up]].
+4. **Severidad de §4** acorde al efecto observado: bloqueante sólo si un dato o una acción
+   quedan inalcanzables sin zoom ni scroll horizontal del documento.
+5. **Corrección dentro de LÍMITES (§1)** y de `module_paths`: ocultar una columna o acción,
+   cambiar texto u orden, un componente compartido o un problema de peso/carga (de
+   [[perf-pass]]) no se corrigen acá, aunque el hallazgo sea cierto.
+6. **Guion verificable.** El ítem que recibiría `/qa` actúa, afirma un valor y nombra el
+   `R-…` (§5.2–§5.3); nunca resize + captura + `toBeVisible`.
+
+`needs_validation` lleva un plan exacto y no destructivo: la misma invocación desde la dev
+machine con [[dev-up]] (ruta, alias y las dos sondas read-only) o lo que observaría el
+operador en un equipo real a ese ancho. No se aplica. Anclas de impacto, subordinadas a la
+escala del contrato: bloqueante ⇒ ALTO · mayor ⇒ MEDIO · menor ⇒ BAJO (`marginal`). Un
+hallazgo corregido al aplicar vuelve a un verificador fresco antes de seguir.
+
+**Ledger de cobertura.** Una unidad por ruta × ancho de la matriz de la Fase 1, con el
+esquema del ledger de cobertura del contrato: en `unit`, `route` y `width`; sus chequeos
+dicen si la celda se examinó en vivo o sólo en la fuente, con el `inventory_target` y los
+archivos leídos. Una celda no examinada (sin app, sin navegador, login, fuera del cap de
+rutas) queda `deferred` con su razón, y un componente compartido, `out_of_scope` con su
+dueño. Con `portrait` sin examinar en vivo, el módulo no queda MADURO.
+
 ## Fase 3 — Propuesta
 
-Cerrar `value_assessment` con la evidencia de la Fase 2 antes de proponer aplicación.
-Sólo pasan los elegibles. Registrar los diferidos y qué evidencia falta a los inciertos;
+Cerrar `value_assessment` con el registro validado de la Fase 2b antes de proponer
+aplicación. Sólo pasan los `confirmed` elegibles. Registrar los diferidos y qué evidencia falta a los inciertos;
 sin elegibles, ir a la Fase 6 y explicar dónde conviene parar. No crear commits vacíos.
 
 Por hallazgo `corregible`: qué cambia (clase/markup/CSS, usando las variantes y componentes del
@@ -293,7 +349,8 @@ de acá se salta a la Fase 5 (sin escribir).
 
 Precondiciones: `standard≠no-canonical` · `host_status≠wrong-host` · identidad git
 (`git var GIT_COMMITTER_IDENT`; si falla, `user.name`/`user.email` repo-local, nunca
-`--global`) · evaluación de valor vigente y elegible · tree limpio en el worktree de sesión.
+`--global`) · registro `confirmed` (Fase 2b) · evaluación de valor vigente y elegible · tree
+limpio en el worktree de sesión.
 Rama y worktree por el protocolo por sesión del
 CLAUDE.md del proyecto (`git-branch-protocol`); si la sesión YA tiene su worktree/rama, se
 reutiliza:
@@ -406,11 +463,25 @@ validan en el siguiente `/qa --apply` — estado previsto por `/qa`, no un error
 
 ## Fase 6 — Registro + reporte (en cualquier modo; registrar no es escribir en el proyecto)
 
+**En un host con el motor de integridad** (`[ -x /usr/local/sbin/vps-integrity ]`), el clon
+`~/webapps/vps-ops-toolkit` está fijado a la generación instalada: esta corrida no escribe ni
+commitea nada en él. El reporte va a
+`~/.local/state/vps-ops-toolkit/responsive-reports/<YYYY-MM-DD>-<proyecto>-responsive-<module-slug>.md`,
+fuera de todo clon, con el fragmento de `--record` del punto 2 y la línea de `watchlist` de la
+5c adentro, como «registro pendiente»; la 5c, el punto 2 y el commit no corren, y el registro
+en el ledger se hace después desde DEV. Lo mismo vale para `--record-qa`. Quién lo trae a DEV:
+la sesión que condujo la pasada deja en su reporte final la ruta y el sha del reporte del host.
+Si hay un orquestador, éste le encarga el `--record` (y el `--record-qa`) a una sesión de DEV
+por su propio canal, nunca a través del operador; si no lo hay, el operador abre una sesión
+de DEV y lo corre ahí. La sesión de DEV lee el reporte del host por `tailscale ssh`, en sólo
+lectura, verifica el sha antes de registrar y lo registra con su fragmento.
+
 1. **Reporte de la corrida** (Write, toolkit):
    `docs/audits/<YYYY-MM-DD>-<proyecto>-responsive-<module-slug>.md` (misma fecha ⇒ sufijo
    `-2`, `-3`; nunca `.bak.md`), secciones fijas: Alcance · Preflight (estándar versión/sync,
    `inventory_target`, coordenada) · Inventario (matriz ruta×ancho) · Hallazgos por tipo (tabla
-   `R-…`) · Cambios aplicados (archivo:línea, commit, PR URL) · Observaciones fuera de alcance ·
+   `R-…`) · Validación (registro y veredicto por hallazgo, Fase 2b) · Ledger de cobertura ·
+   Cambios aplicados (archivo:línea, commit, PR URL) · Observaciones fuera de alcance ·
    Flows declarados/a declarar · Guion de pruebas (bloque brief-e2e) · Beneficio y criterio
    para parar (alcance inspeccionado) · Pendientes con razón ·
    Propuesta de extensión al estándar (si hubo `no-cubierto`). El reporte es inmutable; el
@@ -423,7 +494,7 @@ module: <id>
 status: <diagnosed|applied|qa-pending|blocked|deferred-low-value> # pending sin estándar
 report: docs/audits/<YYYY-MM-DD>-<proyecto>-responsive-<slug>.md
 value_assessment:
-  benefit: <material|minor|unknown>
+  benefit: <material|minor|marginal|unknown>
   effort: <S|M|L>
   change_risk: <low|medium|high>
   mandatory: <true|false>
@@ -461,6 +532,9 @@ borrado, estándar bumpeado) se corrige en esta misma corrida. Cleanup de artefa
 Playwright al cerrar.
 
 ## `--record-qa` — registrar el veredicto de /qa (modo posterior, se tipea)
+
+En un host con el motor de integridad no corre: el veredicto se registra después desde DEV
+(Fase 6).
 
 ```bash
 bash ~/webapps/vps-ops-toolkit/scripts/responsive/responsive-ledger.sh --record-qa <proyecto> --module=<id>
@@ -518,6 +592,8 @@ rama de sesión del proyecto, nunca en el clon principal) y commit del toolkit
   `*.test.*` ni `*.spec.*`: los tests los escribe /qa a partir del guion.
 - "375×667 es donde rompen las grillas" / "tomo las reglas de la rama no mergeada" → los
   anchos y el criterio son los del estándar sincronizado + `project_doc`; nada de ramas ajenas.
+- "Lo vi en la captura, queda confirmado" → confirma un verificador fresco con los cuatro
+  elementos de §5.1 (Fase 2b); sin observación en vivo es una sospecha (`needs_validation`).
 
 ## Acciones disponibles
 
@@ -554,6 +630,8 @@ sobre ESTA corrida; el de /qa es una fila aparte):
 | Inventario estático | ✅ | N archivos leídos 1 vez · N breakpoints · N tablas · N modales |
 | Inventario en vivo | ✅ | <local:3000|staging|prod-readonly> · N rutas × 5 anchos (⏭️ sin app · ⏸️ login) |
 | Hallazgos por tipo | ℹ️ | bloqueante N · mayor N · menor N — TAB N · FORM N · NAV N · TAC N |
+| Validación | ✅ | confirmed N · needs_validation N (con plan) · rejected N — un verificador fresco por hallazgo (⚠️ sin verificador independiente) |
+| Cobertura | ℹ️ | matriz ruta×ancho: celdas no examinadas N con razón · `portrait` en vivo sí/no · huecos del crítico N · estado del frente: MADURO / NO VALE LA PENA / VALE LA PENA / BLOQUEADO / FALTA EVIDENCIA |
 | Beneficio | ℹ️ | elegibles <ids> · diferidos por poco retorno <ids> · falta evidencia <ids> · suficiente <alcance y condición de reapertura> |
 | Cambios aplicados | ✅ | N/N corregibles · commit <sha> · PR #n (⏭️ diagnóstico · ⚠️ N bloqueados) |
 | Observaciones fuera de alcance | ℹ️ | N (funcional N · compartido→layout N · no-cubierto N) |
@@ -579,9 +657,14 @@ Casos de veredicto:
   diagnóstico, N hallazgos NO bajan el veredicto: son el producto.
 - 🟡 estándar `stale`/`absent` (se usó el canónico; falta el sync); inventario en vivo parcial (⏸️ login en alguna ruta); corregibles
   bloqueados; `--uncovered=conservative` usado; `registry=absent`; sin capa e2e (handoff ⏭️,
-  estado `applied`); diagnóstico en `wrong-host`; `responsive_cfg=no` con tema custom detectado.
+  estado `applied`); diagnóstico en `wrong-host`; `responsive_cfg=no` con tema custom detectado;
+  validación incompleta (`needs_validation`, sin verificador independiente o sin crítico).
 - 🔴 guard del diff disparado sin poder aislar; `generate_flow_registry.py --check` falló;
   push/PR fallido; helper del ledger ausente o con error.
 - 🚫 `--apply` sin estándar canónico (`no-canonical`), o `--apply` en `wrong-host` (el diagnóstico se entrega igual).
 - ⏸️ el inventario en vivo exige login interactivo en todas las rutas (se entrega el estático).
 - ⏭️ módulo no identificable tras la pregunta en texto (no se escribe nada).
+
+## Referencias externas
+
+- https://github.com/cloudflare/security-audit-skill · commit c1c8a8c1471069fb0e188eeaff69b8e8db6564a8 · revisado 2026-10-10 · Adaptado de cloudflare/security-audit-skill (MIT) · validación independiente de candidatos, crítico de cobertura y ledger de cobertura

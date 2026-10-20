@@ -666,7 +666,7 @@ else
                 "validate-config-integrity:config-integrity-summary.json"; do
         v="${pair%%:*}"; j="ci-results/${pair##*:}"
         bash "scripts/ci/$v.sh" >/dev/null 2>&1 || true
-        errs="$(python3 -c "import json;print(json.load(open('$j'))['errors'])" 2>/dev/null || echo '?')"
+        errs="$(jq -er '.errors' "$j" 2>/dev/null || echo '?')"
         if [ "$errs" = "0" ]; then echo "  ✅ scripts/ci/$v.sh (0 errores)"
         else echo "  ❌ scripts/ci/$v.sh ($errs errores)"; fails=$((fails+1)); fi
     done

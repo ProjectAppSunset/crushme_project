@@ -1,6 +1,7 @@
 ---
 name: client-report
 description: "Reportes de cambios para el cliente (docs/reports/): crea uno en español, no técnico, y prepara asunto, correo y WhatsApp como nota privada del documento. --list tabula; --find busca por tema. Publica al Gestor de Documentos (MCP) si está disponible, confirmando antes de crear/actualizar."
+allowed-tools: Bash, Read, Write, Edit, AskUserQuestion, mcp__claude_ai_Gestor_Documental__list_folders, mcp__claude_ai_Gestor_Documental__list_documents, mcp__claude_ai_Gestor_Documental__read_document, mcp__claude_ai_Gestor_Documental__create_folder, mcp__claude_ai_Gestor_Documental__create_document, mcp__claude_ai_Gestor_Documental__update_document, mcp__claude_ai_Gestor_de_Comunicaciones__list_secure_link_types, mcp__claude_ai_Gestor_de_Comunicaciones__list_secure_links, mcp__claude_ai_Gestor_de_Comunicaciones__get_secure_link
 argument-hint: "[--list | --find <descripción> | <instrucciones libres>]"
 ---
 
@@ -175,6 +176,9 @@ resultados".
      URL base del ambiente de pruebas en la cabecera; en cada punto, el **primer
      paso** de validación da la **URL completa** para llegar (lista para
      copiar/pegar) y los pasos siguientes usan nombres de pestañas/botones.
+   - **Nada sensible dentro del reporte, tampoco un enlace seguro.** Las URLs del
+     ambiente sí van; una clave, un acceso o la URL de un enlace seguro, nunca: el
+     `.md` se versiona en git y se publica como PDF. Reglas en la Phase 3C.
 
    **Cómo obtener las URLs reales (no las inventes):**
 
@@ -237,20 +241,72 @@ byte con la nota guardada.
 
 ---
 
+## Phase 3C — Información sensible → enlace seguro (solo MODE=create)
+
+ProjectApp tiene **enlaces seguros de un solo uso**. Esta skill aplica el patrón de
+[[client-response]] y la redacción de [[client-message]] (su Phase 6,
+«Información sensible → enlace seguro de un solo uso»); acá sólo se fija lo propio
+de un reporte. Aplica cuando el reporte o su nota tienen que **pedirle** al cliente
+o **entregarle** un dato sensible: contraseñas o claves, llaves API o tokens,
+accesos a servidor, hosting, dominio o base de datos, archivos `.env`, datos
+bancarios, códigos 2FA o de recuperación, o un comunicado confidencial; el caso
+típico es la clave de la cuenta de pruebas que el cliente necesita para validar.
+Ese dato no pasa por esta conversación (regla del fleet R34, «ningún secreto en
+el chat»): la skill no lo pide, no lo recibe ni lo repite.
+
+1. **El reporte nunca lleva el dato ni el enlace.** El `.md` de `docs/reports/` se
+   versiona en git y el Gestor lo convierte en PDF: no lleva el secreto ni la URL
+   de un enlace seguro, que es de un solo uso (quien tenga el repo o el PDF podría
+   abrirlo antes que el cliente). Donde haga falta, el reporte dice «la clave de la
+   cuenta de <rol> se la compartimos por un enlace seguro (ver el correo de
+   entrega)». Sí van la URL del ambiente, el rol, el usuario o correo de la cuenta
+   y la página pública para enviarnos datos
+   (`https://projectapp.co/es-co/secure-link`).
+2. **Citas del cliente.** Si su texto original trae un secreto, esa parte se omite
+   con `[…]` —la única alteración permitida de la cita, igual que las omisiones de
+   [[client-response]]— y se avisa al operador en una línea que ese secreto quedó
+   expuesto y que rotarlo lo decide él.
+3. **La nota privada** (Phase 3B) lleva el pedido o la entrega en el correo, con la
+   explicación corta de [[client-message]]; el WhatsApp sólo avisa que está en el
+   correo, sin URL.
+4. **El enlace lo crea el equipo** en `/panel/secure-links` y en el chat pega sólo
+   la URL; la skill no llama `create_secure_link`, que exige el contenido. Su
+   título no lleva el secreto (el cliente lo ve al abrirlo) y en «Configuración»
+   se asocia al cliente o al proyecto: sin eso `list_secure_links` no lo encuentra.
+   Para revisarlo, «Ver contenido» en el detalle del panel; abrir la URL y pulsar
+   «Ver contenido» gasta el enlace, aunque lo haga alguien del equipo. La URL
+   reemplaza `[ENLACE SEGURO: <título>]` en `client_email_body` antes de
+   `create_document`/`update_document`: es el único cambio permitido a los textos de
+   la Phase 3B y se aplica igual a la copia que se guarda y a la que se devuelve,
+   que siguen coincidiendo byte por byte.
+5. **Sin la URL al confirmar la Phase 4,** el operador elige en esa misma
+   confirmación: pegarla o guardar la nota con el marcador. Con el marcador, el
+   output lo declara pendiente y el veredicto es 🟡. Nunca se pega el secreto como
+   alternativa.
+6. **Del enlace sólo se informa** el título y, si se ubicó con `list_secure_links`
+   (filtrado por un `client_id` o `project_id` ya confirmado) o `get_secure_link`,
+   id, tipo y vencimiento: ninguna de las dos devuelve la URL ni el contenido. Si
+   la URL se pierde, el equipo la copia desde `/panel/secure-links`.
+
+---
+
 ## Phase 4 — Publicar en el Gestor de Documentos (MCP) — solo MODE=create
 
 Tras escribir el `.md` local (Phase 3), publicá el reporte en el **Gestor de
-Documentos** (MCP `Gestor de Documentos`), que lo versiona y genera el PDF con marca.
+Documentos** (conector MCP `Gestor Documental`), que lo versiona y genera el PDF con marca.
 El `.md` en `docs/reports/` sigue siendo la fuente; este paso lo sincroniza al gestor.
 
 **Precondición — disponibilidad del conector.** Este paso requiere las tools del
-conector "Gestor de Documentos" en la sesión — nombre MCP completo:
-`mcp__claude_ai_Gestor_de_Documentos__list_folders`, y con el mismo prefijo
+conector "Gestor Documental" en la sesión — nombre MCP completo:
+`mcp__claude_ai_Gestor_Documental__list_folders`, y con el mismo prefijo
 `…__list_documents`, `…__read_document`, `…__create_folder`, `…__create_document`,
-`…__update_document` — un conector claude.ai del operador. Si NO están disponibles
-(sesión sin el conector o runtime sin acceso), **SALTAR** el paso: dejar constancia en el output (`Gestor de
-Documentos: n/a en esta sesión`) y terminar con el reporte local. **Nunca falles por
-esto.**
+`…__update_document` — un conector claude.ai del operador (en Codex, las mismas
+herramientas del servidor MCP `gestor_documentos`). Si la cuenta todavía lo expone
+con el nombre anterior (`mcp__claude_ai_Gestor_de_Documentos__…`), usá ese mismo
+juego de seis herramientas. Si NO están disponibles (sesión sin el conector o
+runtime sin acceso), **SALTAR** el paso: dejar constancia en el output (`Gestor de
+Documentos: n/a en esta sesión — sin mcp__claude_ai_Gestor_Documental__*`) y
+terminar con el reporte local. **Nunca falles por esto.**
 
 1. **Carpeta destino según el prompt/proyecto.**
    - **Primero, la coordenada persistida.** Leé
@@ -298,6 +354,11 @@ esto.**
    o documento); (b) al actualizar, confirmar qué documento y qué contenido se
    sobrescribe; (c) ante ambigüedad (varias carpetas/documentos candidatos), NO
    adivines — preguntá.
+
+   **Enlace seguro (Phase 3C):** si la nota lleva un enlace, esta misma
+   confirmación dice si ya está su URL (la pegó el operador, tras crearlo el equipo
+   en `/panel/secure-links`) o si la nota se guarda con el marcador; la skill nunca
+   crea el enlace ni pide su contenido.
 
 4. **Contenido y nota.** El markdown que subís es el MISMO cuerpo del reporte de
    Phase 3 (la plantilla del cliente), no un resumen. Los tres valores de Phase 3B
@@ -423,6 +484,7 @@ Reportar siguiendo [[_output-protocol]]. Plantilla específica:
 | Phase 3 — Insumos | ✅ | N puntos (sesión + git log) |
 | Plantilla | ✅ | citas textuales + validación paso a paso |
 | Nota privada | ✅ | asunto + correo + WhatsApp guardados / generados sin persistir |
+| Enlace seguro (si hubo dato sensible) | ✅ | URL pegada (id=… · <tipo> · vence <fecha>, si se ubicó) / ⚠️ marcador pendiente: crear en /panel/secure-links y pegar sólo la URL |
 | Phase 4 — Gestor de Documentos | ✅ | creado id=… / actualizado id=… / n/a (sin conector) / omitido por operador |
 | Git | ⚠️ | sin commitear (decisión del operador) |
 
