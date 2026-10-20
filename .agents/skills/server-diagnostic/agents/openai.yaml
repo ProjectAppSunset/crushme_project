@@ -1,7 +1,0 @@
-interface:
-  display_name: "Server Diagnostic"
-  short_description: "Diagnóstico integral del servidor de producción basado en..."
-  default_prompt: "Use $server-diagnostic to handle this task with its documented workflow."
-
-policy:
-  allow_implicit_invocation: true

@@ -1,7 +1,0 @@
-interface:
-  display_name: "Full Audit"
-  short_description: "Auditoría integral one-shot del VPS (repo + servidor +..."
-  default_prompt: "Use $full-audit to handle this task with its documented workflow."
-
-policy:
-  allow_implicit_invocation: true
